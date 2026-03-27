@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+.env
+*.log
+*.pid
+
+# Node
+node_modules/
+dist/
+build/
+*.local
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfstate*
+ssh-keys/
+
+# Environment / Secrets
+.env
+*.pem
+*.key
+*.secret
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.bak
+
+# Temporary files
+*.tmp
+*.json
+dist-config*.json
