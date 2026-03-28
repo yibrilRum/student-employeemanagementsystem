@@ -13,3 +13,4 @@ pytest-asyncio
 pydantic[email]
 argon2-cffi
 pyjwt
+# https://d2ipaljcx1vm6z.cloudfront.net

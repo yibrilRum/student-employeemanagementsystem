@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchEmployees, createEmployee, updateEmployee, deleteEmployee } from '../services/employeeService';
 import axios from 'axios';
@@ -18,10 +18,23 @@ const Employees = () => {
     status: 'active',
     salary: 0,
   });
+  const [searchTerm, setSearchTerm] = useState('');
   const navigate = useNavigate();
   const isAdmin = localStorage.getItem('is_admin') === 'true';
   const token = localStorage.getItem('access_token');
   const canvasRef = useRef(null);
+
+  // Filter employees based on search term
+  const filteredEmployees = useMemo(() => {
+    if (!searchTerm) return employees;
+    const term = searchTerm.toLowerCase();
+    return employees.filter(emp =>
+      emp.employeeId.toLowerCase().includes(term) ||
+      emp.name.toLowerCase().includes(term) ||
+      emp.department.toLowerCase().includes(term) ||
+      emp.position.toLowerCase().includes(term)
+    );
+  }, [employees, searchTerm]);
 
   const handleLogout = () => {
     localStorage.removeItem('access_token');
@@ -177,7 +190,23 @@ const Employees = () => {
       <nav className="bg-white shadow-md">
         <div className="container mx-auto px-4 py-3 flex justify-between items-center">
           <h1 className="text-xl font-bold text-gray-800">Employee Management System</h1>
-          <div className="space-x-4">
+          <div className="flex items-center space-x-4">
+            {/* Search input */}
+            <input
+              type="text"
+              placeholder="Search by ID, name, department, position..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="px-3 py-1 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="text-gray-500 hover:text-gray-700 text-sm"
+              >
+                Clear
+              </button>
+            )}
             {isAdmin && (
               <button
                 onClick={handleAdd}
@@ -250,7 +279,7 @@ const Employees = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {employees.map((emp) => (
+                {filteredEmployees.map((emp) => (
                   <tr key={emp.employeeId} className="hover:bg-gray-50">
                     <td className="px-4 py-3 whitespace-nowrap text-sm text-center text-gray-900 border-r border-gray-200">{emp.employeeId}</td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm text-center text-gray-900 border-r border-gray-200">{emp.name}</td>

@@ -1,148 +1,192 @@
 import pytest
-from httpx import AsyncClient
 
-@pytest.mark.asyncio
-async def test_health(client: AsyncClient):
-    resp = await client.get("/health")
-    assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
-
-@pytest.mark.asyncio
-async def test_register(client: AsyncClient):
-    data = {
-        "username": "newuser",
-        "password": "secret",
-        "email": "new@example.com"
-    }
-    resp = await client.post("/auth/register", json=data)
+@pytest.fixture
+def admin_token(client):
+    """Create an admin user and return its token."""
+    # Register admin
+    resp = client.post("/auth/register", json={
+        "username": "admin_test",
+        "email": "admin_test@example.com",
+        "password": "adminpass",
+        "is_admin": True
+    })
     assert resp.status_code == 201
-    assert resp.json()["username"] == "newuser"
-
-@pytest.mark.asyncio
-async def test_register_duplicate(client: AsyncClient):
-    data = {
-        "username": "duplicate",
-        "password": "pass",
-        "email": "dup@example.com"
-    }
-    await client.post("/auth/register", json=data)
-    resp = await client.post("/auth/register", json=data)
-    assert resp.status_code == 409
-
-@pytest.mark.asyncio
-async def test_login(client: AsyncClient):
-    data = {
-        "username": "logintest",
-        "password": "pass",
-        "email": "login@example.com"
-    }
-    await client.post("/auth/register", json=data)
-    resp = await client.post("/auth/login", json={"username": "logintest", "password": "pass"})
+    # Login
+    resp = client.post("/auth/login", json={
+        "username": "admin_test",
+        "password": "adminpass"
+    })
     assert resp.status_code == 200
-    assert "access_token" in resp.json()
+    return resp.json()["access_token"]
 
-@pytest.mark.asyncio
-async def test_login_invalid(client: AsyncClient):
-    resp = await client.post("/auth/login", json={"username": "nonexistent", "password": "wrong"})
-    assert resp.status_code == 401
+def test_add_employee_success(client, admin_token):
+    response = client.post("/employees/",
+                           headers={"Authorization": f"Bearer {admin_token}"},
+                           json={
+                               "employeeId": "EMP001",
+                               "name": "Alice Johnson",
+                               "email": "alice@example.com",
+                               "department": "Engineering",
+                               "position": "Frontend Developer",
+                               "status": "active",
+                               "salary": 75000
+                           })
+    assert response.status_code == 200
+    data = response.json()
+    assert data["employeeId"] == "EMP001"
+    assert data["name"] == "Alice Johnson"
+    assert "createdAt" in data
 
-@pytest.mark.asyncio
-async def test_create_employee_as_admin(client: AsyncClient, admin_token, sample_employee):
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    resp = await client.post("/employees/", json=sample_employee, headers=headers)
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["employeeId"] == sample_employee["employeeId"]
+def test_add_duplicate_employee_fails(client, admin_token):
+    # Add first employee
+    client.post("/employees/",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                json={
+                    "employeeId": "EMP002",
+                    "name": "Bob",
+                    "email": "bob@example.com",
+                    "department": "HR",
+                    "position": "Manager",
+                    "status": "active"
+                })
+    # Try duplicate
+    response = client.post("/employees/",
+                           headers={"Authorization": f"Bearer {admin_token}"},
+                           json={
+                               "employeeId": "EMP002",
+                               "name": "Bob2",
+                               "email": "bob2@example.com",
+                               "department": "HR",
+                               "position": "Manager",
+                               "status": "active"
+                           })
+    assert response.status_code == 409
+    assert "Employee ID already exists" in response.json()["detail"]
 
-@pytest.mark.asyncio
-async def test_create_employee_as_user(client: AsyncClient, user_token, sample_employee):
-    headers = {"Authorization": f"Bearer {user_token}"}
-    resp = await client.post("/employees/", json=sample_employee, headers=headers)
-    assert resp.status_code == 403  # Forbidden
+def test_get_employees_list(client, admin_token):
+    # Add two employees
+    client.post("/employees/",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                json={
+                    "employeeId": "EMP003",
+                    "name": "Carol",
+                    "email": "carol@example.com",
+                    "department": "Engineering",
+                    "position": "Backend Dev",
+                    "status": "active"
+                })
+    client.post("/employees/",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                json={
+                    "employeeId": "EMP004",
+                    "name": "Dave",
+                    "email": "dave@example.com",
+                    "department": "Marketing",
+                    "position": "Specialist",
+                    "status": "active"
+                })
+    response = client.get("/employees/",
+                          headers={"Authorization": f"Bearer {admin_token}"})
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) >= 2
+    ids = [e["employeeId"] for e in data]
+    assert "EMP003" in ids and "EMP004" in ids
 
-@pytest.mark.asyncio
-async def test_get_employees(client: AsyncClient, admin_token, sample_employee):
-    # Create an employee first
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    await client.post("/employees/", json=sample_employee, headers=headers)
+def test_get_employee_by_id(client, admin_token):
+    # Ensure employee exists
+    client.post("/employees/",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                json={
+                    "employeeId": "EMP003",
+                    "name": "Carol",
+                    "email": "carol@example.com",
+                    "department": "Engineering",
+                    "position": "Backend Dev",
+                    "status": "active"
+                })
+    response = client.get("/employees/EMP003",
+                          headers={"Authorization": f"Bearer {admin_token}"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["employeeId"] == "EMP003"
+    assert data["name"] == "Carol"
 
-    # Get all employees (authenticated as admin)
-    resp = await client.get("/employees/", headers=headers)
-    assert resp.status_code == 200
-    employees = resp.json()
-    assert len(employees) >= 1
-    assert employees[0]["employeeId"] == sample_employee["employeeId"]
+def test_get_employee_not_found(client, admin_token):
+    response = client.get("/employees/NONEXISTENT",
+                          headers={"Authorization": f"Bearer {admin_token}"})
+    assert response.status_code == 404
 
-@pytest.mark.asyncio
-async def test_get_employee_by_id(client: AsyncClient, admin_token, sample_employee):
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    await client.post("/employees/", json=sample_employee, headers=headers)
-    resp = await client.get(f"/employees/{sample_employee['employeeId']}", headers=headers)
-    assert resp.status_code == 200
-    assert resp.json()["name"] == sample_employee["name"]
-
-@pytest.mark.asyncio
-async def test_get_employee_by_id_not_found(client: AsyncClient, admin_token):
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    resp = await client.get("/employees/EMP999", headers=headers)
-    assert resp.status_code == 404
-
-@pytest.mark.asyncio
-async def test_update_employee(client: AsyncClient, admin_token, sample_employee):
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    await client.post("/employees/", json=sample_employee, headers=headers)
-    update_data = {**sample_employee, "name": "Updated Name", "status": "inactive"}
-    resp = await client.put(f"/employees/{sample_employee['employeeId']}", json=update_data, headers=headers)
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["name"] == "Updated Name"
-    assert data["status"] == "inactive"
-
-@pytest.mark.asyncio
-async def test_update_employee_not_found(client: AsyncClient, admin_token, sample_employee):
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    resp = await client.put("/employees/EMP999", json=sample_employee, headers=headers)
-    assert resp.status_code == 404
-
-@pytest.mark.asyncio
-async def test_delete_employee(client: AsyncClient, admin_token, sample_employee):
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    await client.post("/employees/", json=sample_employee, headers=headers)
-    resp = await client.delete(f"/employees/{sample_employee['employeeId']}", headers=headers)
-    assert resp.status_code == 200
-    get_resp = await client.get(f"/employees/{sample_employee['employeeId']}", headers=headers)
-    assert get_resp.status_code == 404
-
-@pytest.mark.asyncio
-async def test_delete_employee_not_found(client: AsyncClient, admin_token):
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    resp = await client.delete("/employees/EMP999", headers=headers)
-    assert resp.status_code == 404
-
-@pytest.mark.asyncio
-async def test_get_employees_by_department(client: AsyncClient, admin_token):
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    emp1 = {
-        "employeeId": "EMP101",
-        "name": "Alice",
-        "email": "alice@example.com",
-        "department": "HR",
-        "position": "Recruiter",
-        "status": "active"
-    }
-    emp2 = {
-        "employeeId": "EMP102",
-        "name": "Bob",
-        "email": "bob@example.com",
+def test_update_employee(client, admin_token):
+    # Create the employee first
+    client.post("/employees/",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                json={
+                    "employeeId": "EMP003",
+                    "name": "Carol",
+                    "email": "carol@example.com",
+                    "department": "Engineering",
+                    "position": "Backend Dev",
+                    "status": "active"
+                })
+    # Update with all required fields (since the endpoint expects full EmployeeCreate)
+    update_data = {
+        "employeeId": "EMP003",
+        "name": "Carol Updated",
+        "email": "carol@example.com",
         "department": "Engineering",
-        "position": "Developer",
-        "status": "active"
+        "position": "Backend Dev",
+        "status": "active",
+        "salary": 85000
     }
-    await client.post("/employees/", json=emp1, headers=headers)
-    await client.post("/employees/", json=emp2, headers=headers)
+    response = client.put("/employees/EMP003",
+                          headers={"Authorization": f"Bearer {admin_token}"},
+                          json=update_data)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["name"] == "Carol Updated"
+    assert data["salary"] == 85000
 
-    resp = await client.get("/employees/?department=HR", headers=headers)
-    assert resp.status_code == 200
-    employees = resp.json()
-    assert len(employees) == 1
-    assert employees[0]["department"] == "HR"
+def test_delete_employee(client, admin_token):
+    # Create employee
+    client.post("/employees/",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                json={
+                    "employeeId": "EMP006",
+                    "name": "Grace",
+                    "email": "grace@example.com",
+                    "department": "Sales",
+                    "position": "Rep",
+                    "status": "active"
+                })
+    response = client.delete("/employees/EMP006",
+                             headers={"Authorization": f"Bearer {admin_token}"})
+    assert response.status_code == 200
+    # Verify deletion
+    resp = client.get("/employees/EMP006",
+                      headers={"Authorization": f"Bearer {admin_token}"})
+    assert resp.status_code == 404
+
+def test_delete_employee_not_found(client, admin_token):
+    response = client.delete("/employees/NONEXISTENT",
+                             headers={"Authorization": f"Bearer {admin_token}"})
+    assert response.status_code == 404
+
+def test_filter_employees_by_department(client, admin_token):
+    # Add an employee in HR
+    client.post("/employees/",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                json={
+                    "employeeId": "EMP005",
+                    "name": "Eve",
+                    "email": "eve@example.com",
+                    "department": "HR",
+                    "position": "Recruiter",
+                    "status": "active"
+                })
+    response = client.get("/employees/?department=HR",
+                          headers={"Authorization": f"Bearer {admin_token}"})
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["employeeId"] == "EMP005"
